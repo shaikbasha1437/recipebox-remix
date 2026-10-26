@@ -1,0 +1,12 @@
+{
+  "name": "RecipeBox Remix · Private recipe box",
+  "short_name": "RecipeBox",
+  "description": "Import, scale and convert recipes, build merged grocery lists, plan meals and cook hands-free. Private and offline-friendly.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff8f1",
+  "theme_color": "#c2410c",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
