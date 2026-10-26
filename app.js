@@ -60,9 +60,37 @@
 
   // ---------- helpers ----------
   let toastT;
-  function toast(msg, ms) {
-    const t = $('#toast'); t.textContent = msg; t.hidden = false;
-    clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 2600);
+  // toast(message, ms, { label: 'Undo', fn }) shows an optional action button.
+  function toast(msg, ms, action) {
+    const t = $('#toast'), b = $('#toastAct');
+    // Inside an open <dialog> the page is inert, so show the toast in the dialog's top layer.
+    const host = document.querySelector('dialog[open]') || document.body;
+    if (t.parentNode !== host) host.appendChild(t);
+    $('#toastMsg').textContent = msg;
+    if (action) { b.hidden = false; b.textContent = action.label; b.onclick = () => { t.hidden = true; clearTimeout(toastT); action.fn(); }; } else { b.hidden = true; b.onclick = null; }
+    t.hidden = false;
+    clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || (action ? 7000 : 2600));
+  }
+  RB.toast = toast;
+  RB.version = "2";
+  function undoToast(msg, undo) { toast(msg, 7000, { label: 'Undo', fn: () => { undo(); toast('Restored'); } }); }
+
+  // ---------- sheets & overlays: close via ✕, Cancel, Esc, backdrop tap or Back ----------
+  const MS = window.RBModal.createModalStack({ history: window.history, confirm: (q) => window.confirm(q) });
+  window.addEventListener('popstate', () => MS.onPopState());
+  RB.modals = MS;
+  RB.openModal = () => (MS.top() ? MS.top().id : null);
+  function dialogModal(id, dlg, opts) {
+    opts = opts || {};
+    const m = { id, isDirty: opts.isDirty, show: () => { if (!dlg.open) dlg.showModal(); }, hide: () => { if (dlg.open) dlg.close(); if (opts.onHide) opts.onHide(); } };
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); MS.requestClose(id); });
+    let downOnBackdrop = false;
+    // A tap on the dimmed area outside the sheet (the <dialog> itself, not its content) closes it.
+    dlg.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === dlg; });
+    dlg.addEventListener('click', (e) => { if (e.target === dlg && downOnBackdrop) MS.requestClose(id); downOnBackdrop = false; });
+    // If the browser force-closes the dialog, keep history in step.
+    dlg.addEventListener('close', () => { if (MS.isOpen(id)) MS.close(id); });
+    return m;
   }
   const byId = (id) => S.recipes.find((r) => r.id === id);
   const recipesById = () => Object.fromEntries(S.recipes.map((r) => [r.id, r]));
@@ -100,7 +128,7 @@
   };
 
   // ---------- routing ----------
-  const VIEWS = ['recipes', 'recipe', 'plan', 'grocery', 'import', 'settings'];
+  const VIEWS = ['recipes', 'recipe', 'discover', 'plan', 'grocery', 'import', 'settings'];
   function show(v) {
     for (const x of VIEWS) $('#view-' + x).hidden = x !== v;
     const tab = v === 'recipe' ? 'recipes' : v;
@@ -113,13 +141,23 @@
     const m = h.match(/^#\/(\w+)(?:\/(.+))?/);
     const v = m ? m[1] : 'recipes';
     if (v === 'recipe' && m[2] && byId(decodeURIComponent(m[2]))) { renderRecipe(decodeURIComponent(m[2])); show('recipe'); window.scrollTo(0, 0); return; }
+    if (v === 'discover') { renderDiscover(); show('discover'); return; }
     if (v === 'plan') { renderPlan(); show('plan'); return; }
     if (v === 'grocery') { renderGrocery(); show('grocery'); return; }
     if (v === 'import') { show('import'); return; }
     if (v === 'settings') { renderSettings(); show('settings'); return; }
     renderList(); show('recipes');
   }
-  window.addEventListener('hashchange', route);
+  // Number each in-app history entry, so "← Back" only goes back when there is somewhere in the app to go.
+  const navIdx = () => (history.state && typeof history.state.rbNav === 'number' ? history.state.rbNav : 0);
+  let lastNav = 0;
+  try { if (!history.state || typeof history.state.rbNav !== 'number') history.replaceState(Object.assign({}, history.state, { rbNav: 0 }), ''); } catch (e) { /* ignore */ }
+  window.addEventListener('hashchange', () => {
+    try { if (!history.state || typeof history.state.rbNav !== 'number') history.replaceState(Object.assign({}, history.state, { rbNav: lastNav + 1 }), ''); } catch (e) { /* ignore */ }
+    lastNav = navIdx(); route();
+  });
+  // "← Back" on a recipe returns to wherever you came from (Discover, planner, list…).
+  document.addEventListener('click', (e) => { const a = e.target.closest('[data-back]'); if (!a) return; e.preventDefault(); if (navIdx() > 0 && !MS.size) history.back(); else location.hash = a.getAttribute('href'); });
 
   // ---------- recipe list ----------
   const LF = { q: '', tag: '', fav: false, sort: 'updated' };
@@ -223,17 +261,21 @@
   $('#dFav').onclick = () => { const r = byId(RV.id); if (!r) return; r.favorite = !r.favorite; r.updatedAt = new Date().toISOString(); save(); renderRecipe(r.id); };
   $('#dEdit').onclick = () => openEditor(byId(RV.id));
   const closeMenu = () => { const d = $('#view-recipe details.menu'); if (d) d.open = false; };
+  document.addEventListener('click', (e) => { for (const d of document.querySelectorAll('details.menu[open]')) if (!d.contains(e.target)) d.open = false; });
+  document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; const d = document.querySelector('details.menu[open]'); if (d) { d.open = false; d.querySelector('summary').focus(); } });
   $('#dPlan').onclick = () => { closeMenu(); pickDay(RV.id); };
   $('#dMd').onclick = () => { closeMenu(); const r = byId(RV.id); const f = factorFor(r); download(slug(r.title) + '.md', C.toMarkdown(r, f.factor, RV.units), 'text/markdown'); };
   $('#dCopy').onclick = async () => { closeMenu(); const r = byId(RV.id); const f = factorFor(r); toast((await copyText(C.toMarkdown(r, f.factor, RV.units))) ? 'Recipe copied' : 'Copy failed'); };
   $('#dPrint').onclick = () => { closeMenu(); printRecipe(byId(RV.id)); };
   $('#dDup').onclick = () => { closeMenu(); const r = byId(RV.id); const c = C.normalizeRecipe(Object.assign({}, r, { id: null, title: r.title + ' (copy)', createdAt: null, updatedAt: null, sample: false })); S.recipes.push(c); save(); location.hash = '#/recipe/' + encodeURIComponent(c.id); toast('Duplicated'); };
   $('#dDel').onclick = () => {
-    closeMenu(); const r = byId(RV.id); if (!r || !confirm(`Delete “${r.title}”? This can't be undone.`)) return;
+    closeMenu(); const r = byId(RV.id); if (!r) return;
+    const snap = { idx: S.recipes.indexOf(r), plan: JSON.parse(JSON.stringify(S.plan)), gro: S.grocery.recipes.slice() };
     S.recipes = S.recipes.filter((x) => x.id !== r.id);
-    for (const d of Object.keys(S.plan)) S.plan[d] = S.plan[d].filter((e) => e.recipeId !== r.id);
+    for (const d of Object.keys(S.plan)) { S.plan[d] = S.plan[d].filter((e) => e.recipeId !== r.id); if (!S.plan[d].length) delete S.plan[d]; }
     S.grocery.recipes = S.grocery.recipes.filter((e) => e.recipeId !== r.id);
-    save(); updateBadge(); location.hash = '#/recipes'; toast('Recipe deleted');
+    save(); updateBadge(); location.hash = '#/recipes';
+    undoToast(`Deleted “${r.title}”`, () => { if (!byId(r.id)) S.recipes.splice(Math.min(snap.idx, S.recipes.length), 0, r); S.plan = snap.plan; S.grocery.recipes = snap.gro; save(); updateBadge(); route(); });
   };
   function printRecipe(r) {
     const f = factorFor(r); const units = RV.units || 'original';
@@ -258,8 +300,18 @@
     $('#edFav').checked = !!x.favorite; $('#edSource').value = x.source || '';
     edRating = x.rating || 0; renderEdStars();
     edPhoto = x.photo || ''; showEdPhoto();
-    $('#editDlg').showModal(); $('#edTitle').focus();
+    $('#edTitleErr').hidden = true;
+    MS.open(EDM);
+    edSnap = edState();
+    $('#editDlg .sheet-body').scrollTop = 0;
+    if (matchMedia('(pointer:fine)').matches) $('#edTitle').focus(); else $('#edClose').focus();
   }
+  let edSnap = '';
+  const ED_FIELDS = ['#edTitle', '#edDesc', '#edServ', '#edPrep', '#edCook', '#edYield', '#edIng', '#edSteps', '#edNotes', '#edTags', '#edSource'];
+  const edState = () => JSON.stringify([ED_FIELDS.map((f) => $(f).value), $('#edFav').checked, edPhoto, edRating]);
+  const EDM = dialogModal('editor', $('#editDlg'), { isDirty: () => edState() !== edSnap });
+  RB.editorDirty = () => edState() !== edSnap;
+  $('#edClose').onclick = $('#edCancel').onclick = () => MS.requestClose('editor');
   RB.openEditor = (id) => openEditor(id ? byId(id) : null);
   function showEdPhoto() { const im = $('#edPhotoPrev'); const u = safeUrl(edPhoto); im.hidden = !u; if (u) im.src = u; else im.removeAttribute('src'); }
   $('#edRating').onclick = (e) => { const b = e.target.closest('[data-star]'); if (!b) return; const n = +b.dataset.star; edRating = edRating === n ? 0 : n; renderEdStars(); };
@@ -273,9 +325,11 @@
       img.src = url;
     });
   }
-  $('#editDlg').addEventListener('close', () => {
-    if ($('#editDlg').returnValue !== 'save') return;
-    const title = $('#edTitle').value.trim() || 'Untitled recipe';
+  $('#edTitle').addEventListener('input', () => { if ($('#edTitle').value.trim()) $('#edTitleErr').hidden = true; });
+  $('#edForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const title = $('#edTitle').value.trim();
+    if (!title) { $('#edTitleErr').hidden = false; $('#editDlg .sheet-body').scrollTop = 0; $('#edTitle').focus(); return; }
     const old = editing ? byId(editing) : null;
     const r = C.normalizeRecipe({
       id: old ? old.id : (edDraft && edDraft.id) || null, title, description: $('#edDesc').value, servings: $('#edServ').value, prepMin: $('#edPrep').value, cookMin: $('#edCook').value, yieldText: $('#edYield').value,
@@ -284,10 +338,11 @@
       createdAt: old ? old.createdAt : null, updatedAt: new Date().toISOString(),
     });
     if (old) Object.assign(old, r); else S.recipes.push(r);
-    save(); clearPreview(); toast(old ? 'Saved' : 'Recipe added');
+    save(); clearPreview();
+    await MS.close('editor');
+    toast(old ? 'Saved' : 'Recipe added');
     if (location.hash === '#/recipe/' + encodeURIComponent(r.id)) route(); else location.hash = '#/recipe/' + encodeURIComponent(r.id);
   });
-  $('#edForm').addEventListener('submit', (e) => { if (e.submitter && e.submitter.value === 'save' && !$('#edTitle').value.trim()) { e.preventDefault(); $('#edTitle').focus(); } });
 
   // ---------- grocery ----------
   function addToGrocery(recipeId, servings, fromPlan) {
@@ -304,7 +359,7 @@
   function groceryItems() {
     const by = recipesById();
     const entries = C.groceryEntries(S.grocery.recipes.map((e) => ({ recipeId: e.recipeId, servings: e.servings })), by);
-    for (const m of S.grocery.manual) entries.push({ ingredient: m.text, factor: 1, source: 'Added by you' });
+    for (const m of S.grocery.manual) entries.push({ ingredient: m.text, factor: 1, source: m.from || 'Added by you' });
     return C.mergeGrocery(entries, { system: S.settings.groUnits || 'us', pantry: S.pantry }).filter((i) => !S.grocery.hidden[i.key]);
   }
   RB.groceryItems = groceryItems;
@@ -329,19 +384,19 @@
     updateBadge();
   }
   $('#groList').addEventListener('change', (e) => { const k = e.target.dataset.gk; if (k == null) return; if (e.target.checked) S.grocery.checked[k] = true; else delete S.grocery.checked[k]; e.target.closest('li').classList.toggle('done', e.target.checked); save(); updateBadge(); });
-  $('#groList').addEventListener('click', (e) => { const b = e.target.closest('[data-gdel]'); if (!b) return; const k = b.dataset.gdel; S.grocery.manual = S.grocery.manual.filter((m) => { const p = C.parseIngredient(m.text); return C.nameKey(p.name) !== k; }); S.grocery.hidden[k] = true; save(); renderGrocery(); });
+  $('#groList').addEventListener('click', (e) => { const b = e.target.closest('[data-gdel]'); if (!b) return; const k = b.dataset.gdel; const snap = JSON.parse(JSON.stringify(S.grocery)); const label = (b.getAttribute('aria-label') || 'Remove item').replace(/^Remove /, ''); S.grocery.manual = S.grocery.manual.filter((m) => { const p = C.parseIngredient(m.text); return C.nameKey(p.name) !== k; }); S.grocery.hidden[k] = true; save(); renderGrocery(); undoToast(`Removed ${label}`, () => { S.grocery = snap; save(); renderGrocery(); }); });
   $('#groRecipes').addEventListener('change', (e) => { const id = e.target.dataset.gserv; if (!id) return; const en = S.grocery.recipes.find((x) => x.id === id); const v = parseFloat(e.target.value); if (en && v > 0) { en.servings = v; save(); renderGrocery(); } });
-  $('#groRecipes').addEventListener('click', (e) => { const b = e.target.closest('[data-grm]'); if (!b) return; S.grocery.recipes = S.grocery.recipes.filter((x) => x.id !== b.dataset.grm); save(); renderGrocery(); });
+  $('#groRecipes').addEventListener('click', (e) => { const b = e.target.closest('[data-grm]'); if (!b) return; const snap = JSON.parse(JSON.stringify(S.grocery)); S.grocery.recipes = S.grocery.recipes.filter((x) => x.id !== b.dataset.grm); save(); renderGrocery(); undoToast('Recipe removed from list', () => { S.grocery = snap; save(); renderGrocery(); }); });
   $('#groAdd').onsubmit = (e) => { e.preventDefault(); const v = $('#groItem').value.trim(); if (!v) return; const add = v.split(/\s*[;\n]\s*/).filter(Boolean); for (const t of add) S.grocery.manual.push({ id: C.uid(), text: t }); unhide(add.map((t) => ({ ingredient: t }))); $('#groItem').value = ''; save(); renderGrocery(); };
   $('#pantryAdd').onsubmit = (e) => { e.preventDefault(); const v = $('#pantryItem').value.trim(); if (!v) return; for (const t of v.split(/\s*,\s*/)) if (t && !S.pantry.includes(t.toLowerCase())) S.pantry.push(t.toLowerCase()); $('#pantryItem').value = ''; save(); renderGrocery(); };
-  $('#pantryChips').onclick = (e) => { const b = e.target.closest('[data-pdel]'); if (!b) return; S.pantry.splice(+b.dataset.pdel, 1); save(); renderGrocery(); };
+  $('#pantryChips').onclick = (e) => { const b = e.target.closest('[data-pdel]'); if (!b) return; const i = +b.dataset.pdel, was = S.pantry[i]; S.pantry.splice(i, 1); save(); renderGrocery(); undoToast(`Removed “${was}” from pantry`, () => { if (!S.pantry.includes(was)) S.pantry.splice(i, 0, was); save(); renderGrocery(); }); };
   $('#groUnits').onchange = (e) => { S.settings.groUnits = e.target.value; save(); renderGrocery(); };
   const groText = () => 'Grocery list\n\n' + C.groceryText(groceryItems(), S.grocery.checked);
   RB.groceryText = groText;
   $('#groCopy').onclick = async () => toast((await copyText(groText())) ? 'List copied' : 'Copy failed');
   $('#groShare').onclick = async () => { const text = groText(); if (navigator.share) { try { await navigator.share({ title: 'Grocery list', text }); return; } catch (e) { if (e.name === 'AbortError') return; } } toast((await copyText(text)) ? 'Sharing not available here, so the list was copied' : 'Copy failed'); };
   $('#groClearChecked').onclick = () => { for (const k of Object.keys(S.grocery.checked)) S.grocery.hidden[k] = true; S.grocery.manual = S.grocery.manual.filter((m) => !S.grocery.checked[C.nameKey(C.parseIngredient(m.text).name)]); S.grocery.checked = {}; save(); renderGrocery(); };
-  $('#groClear').onclick = () => { if (!confirm('Clear the whole grocery list?')) return; S.grocery = { recipes: [], manual: [], checked: {}, hidden: {} }; save(); renderGrocery(); };
+  $('#groClear').onclick = () => { const snap = JSON.parse(JSON.stringify(S.grocery)); S.grocery = { recipes: [], manual: [], checked: {}, hidden: {} }; save(); renderGrocery(); undoToast('Grocery list cleared', () => { S.grocery = snap; save(); renderGrocery(); }); };
 
   // ---------- meal planner ----------
   let wkOff = 0;
@@ -381,7 +436,7 @@
     if (e.target.dataset.add != null && e.target.value) { addToPlan(e.target.dataset.add, e.target.value); renderPlan(); return; }
     if (e.target.dataset.eserv) { const en = (S.plan[e.target.dataset.d] || []).find((x) => x.id === e.target.dataset.eserv); const v = parseFloat(e.target.value); if (en && v > 0) { en.servings = v; save(); } }
   });
-  $('#planDays').addEventListener('click', (e) => { const b = e.target.closest('[data-edel]'); if (!b) return; S.plan[b.dataset.d] = (S.plan[b.dataset.d] || []).filter((x) => x.id !== b.dataset.edel); if (!S.plan[b.dataset.d].length) delete S.plan[b.dataset.d]; save(); renderPlan(); });
+  $('#planDays').addEventListener('click', (e) => { const b = e.target.closest('[data-edel]'); if (!b) return; const snap = JSON.parse(JSON.stringify(S.plan)); S.plan[b.dataset.d] = (S.plan[b.dataset.d] || []).filter((x) => x.id !== b.dataset.edel); if (!S.plan[b.dataset.d].length) delete S.plan[b.dataset.d]; save(); renderPlan(); undoToast('Removed from plan', () => { S.plan = snap; save(); renderPlan(); }); });
   $('#planPool').addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) pickDay(b.dataset.pick); });
   $('#planToGro').onclick = () => {
     const entries = C.planEntries(S.plan, curDays());
@@ -393,11 +448,20 @@
     const r = byId(recipeId); if (!r) return;
     const days = curDays();
     $('#dayH').textContent = 'Plan “' + r.title + '”';
-    $('#dayPick').innerHTML = days.map((d, i) => `<button class="btn" value="${d}" data-pd="${d}">${DAYN[i]} · ${esc(fmtDay(d, { month: 'short', day: 'numeric' }))}${(S.plan[d] || []).length ? ` <span class="hint">(${S.plan[d].length} planned)</span>` : ''}</button>`).join('');
-    const dlg = $('#dayDlg');
-    dlg.onclose = () => { const d = dlg.returnValue; if (/^\d{4}-/.test(d)) { addToPlan(d, recipeId); toast(`Planned for ${fmtDay(d, { weekday: 'long' })}`); if (!$('#view-plan').hidden) renderPlan(); } };
-    dlg.returnValue = ''; dlg.showModal();
+    $('#dayPick').innerHTML = days.map((d, i) => `<button class="btn" type="button" data-pd="${d}">${DAYN[i]} · ${esc(fmtDay(d, { month: 'short', day: 'numeric' }))}${(S.plan[d] || []).length ? ` <span class="hint">(${S.plan[d].length} planned)</span>` : ''}</button>`).join('');
+    dayFor = recipeId;
+    MS.open(DAYM);
   }
+  let dayFor = null;
+  const DAYM = dialogModal('day', $('#dayDlg'));
+  $('#dayClose').onclick = $('#dayCancel').onclick = () => MS.requestClose('day');
+  $('#dayPick').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-pd]'); if (!b || !dayFor) return;
+    const d = b.dataset.pd; addToPlan(d, dayFor); dayFor = null;
+    await MS.close('day');
+    toast(`Planned for ${fmtDay(d, { weekday: 'long' })}`, 4000, { label: 'View plan', fn: () => { location.hash = '#/plan'; } });
+    if (!$('#view-plan').hidden) renderPlan();
+  });
 
   // ---------- import ----------
   let preview = null;
@@ -534,6 +598,7 @@
   RB.cook = { wakeLock: 'off', voice: 'off' };
   async function requestWake() {
     if (!('wakeLock' in navigator)) { RB.cook.wakeLock = 'unsupported'; return; }
+    RB.cook.wakeLock = 'pending';
     try { wakeLock = await navigator.wakeLock.request('screen'); RB.cook.wakeLock = 'active'; wakeLock.addEventListener('release', () => { if (RB.cook.wakeLock === 'active') RB.cook.wakeLock = 'released'; }); }
     catch (e) { RB.cook.wakeLock = 'denied'; }
   }
@@ -549,6 +614,7 @@
     cookState = { id, idx: 0, steps, ings, factor: f.factor, units, title: r.title };
     $('#cookTitle').textContent = r.title;
     $('#cookIngs').innerHTML = `<h3>Ingredients${r.servings ? ' · ' + esc(C.formatFraction(f.target)) + ' servings' : ''}</h3><ul class="ings">` + ings.map((i, k) => { if (i.section) return `<li class="sec">${esc(i.section)}</li>`; const p = C.presentIngredient(i, f.factor, units); return `<li data-ci="${k}"><span class="itxt">${esc(p.text)}</span></li>`; }).join('') + '</ul>';
+    MS.open({ id: 'cook', show: () => {}, hide: () => teardownCook() });
     $('#cook').hidden = false; document.body.style.overflow = 'hidden'; document.body.classList.add('cooking');
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     $('#cookVoice').hidden = !SR || S.settings.voice === false;
@@ -577,10 +643,11 @@
   }
   function cookGo(d) {
     const c = cookState; if (!c) return;
-    if (d > 0 && c.idx === c.steps.length - 1) { closeCook(); toast('Enjoy your meal! 🍽️'); return; }
+    if (d > 0 && c.idx === c.steps.length - 1) { closeCook().then(() => toast('Enjoy your meal! 🍽️')); return; }
     c.idx = Math.max(0, Math.min(c.steps.length - 1, c.idx + d)); renderCook();
   }
-  function closeCook() {
+  function closeCook() { if (MS.isOpen('cook')) return MS.requestClose('cook'); teardownCook(); return Promise.resolve(true); }
+  function teardownCook() {
     cookState = null; $('#cook').hidden = true; document.body.style.overflow = ''; document.body.classList.remove('cooking');
     if (wakeLock) { try { wakeLock.release(); } catch (e) { /* ignore */ } wakeLock = null; }
     RB.cook.wakeLock = 'off';
@@ -641,6 +708,146 @@
   $('#cook').addEventListener('touchstart', (e) => { tx0 = e.touches[0].clientX; }, { passive: true });
   $('#cook').addEventListener('touchend', (e) => { if (tx0 == null) return; const dx = e.changedTouches[0].clientX - tx0; tx0 = null; if (Math.abs(dx) > 70 && !e.target.closest('button,.cook-ings')) cookGo(dx < 0 ? 1 : -1); });
 
+  // ---------- discover (TheMealDB) ----------
+  const M = window.RBMeal;
+  const DC = new Map();
+  const DS = { label: '', list: null, req: 0, ings: null };
+  async function mdb(url) {
+    if (DC.has(url)) return DC.get(url);
+    try { const c = sessionStorage.getItem('rbr-mdb:' + url); if (c) { const v = JSON.parse(c); DC.set(url, v); return v; } } catch (e) { /* ignore */ }
+    if (navigator.onLine === false) throw new Error('offline');
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 12000);
+    let res;
+    try { res = await fetch(url, { signal: ctl.signal }); } catch (e) { throw new Error(navigator.onLine === false ? 'offline' : 'network'); } finally { clearTimeout(t); }
+    if (!res.ok) throw new Error('http ' + res.status);
+    const v = await res.json();
+    DC.set(url, v);
+    try { sessionStorage.setItem('rbr-mdb:' + url, JSON.stringify(v)); } catch (e) { /* storage full: memory cache only */ }
+    return v;
+  }
+  RB.mdbCache = DC;
+  const errText = (e) => (e && e.message === 'offline' ? "You're offline. Discover needs a connection; your saved recipes still work offline." : "Couldn't reach TheMealDB right now. Check your connection and try again.");
+  function discStatus(msg, kind) { const s = $('#discStatus'); s.innerHTML = msg; s.className = 'disc-status' + (kind ? ' ' + kind : ''); }
+  function renderDiscoverChrome() {
+    if ($('#discAreas').childElementCount) return;
+    $('#discAreas').innerHTML = M.AREAS.map((a) => `<button type="button" class="chip" data-area="${esc(a.value)}">${esc(a.label)}</button>`).join('');
+    $('#discCats').innerHTML = M.CATEGORIES.map((c) => `<button type="button" class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('');
+    $('#discAbout').innerHTML = `Search a free library of about ${M.LIBRARY_SIZE} dishes from ${M.AREAS.length} cuisines, from <a href="https://www.themealdb.com/" target="_blank" rel="noopener">TheMealDB</a>. It's a curated collection, not every recipe in the world; for anything else use <a href="#/import">Import</a> or the bookmarklet.`;
+  }
+  function renderDiscover() {
+    renderDiscoverChrome();
+    if (DS.list) drawResults(); else if (!DS.req) discStatus('Search above, pick a cuisine or category, or tap <b>🎲 Surprise me</b>. Try: ' + ['Chicken', 'Pasta', 'Curry', 'Cake', 'Soup', 'Salmon'].map((q) => `<button type="button" class="linkbtn" data-try="${q}">${q}</button>`).join(', '));
+  }
+  function markChips() {
+    for (const b of $$('#discAreas [data-area]')) b.classList.toggle('on', DS.key === 'a:' + b.dataset.area);
+    for (const b of $$('#discCats [data-cat]')) b.classList.toggle('on', DS.key === 'c:' + b.dataset.cat);
+  }
+  async function discLoad(key, label, fn) {
+    const req = ++DS.req; DS.key = key; markChips();
+    discStatus('Loading ' + esc(label) + '…', 'loading'); $('#discGrid').setAttribute('aria-busy', 'true');
+    try {
+      const list = await fn(); if (req !== DS.req) return;
+      DS.list = list; DS.label = label; drawResults();
+    } catch (e) { if (req !== DS.req) return; DS.list = null; $('#discGrid').innerHTML = ''; discStatus(esc(errText(e)) + ' <button type="button" class="btn small" id="discRetry">Try again</button>', 'error'); DS.retry = () => discLoad(key, label, fn); }
+    finally { if (req === DS.req) $('#discGrid').removeAttribute('aria-busy'); }
+  }
+  RB.discoverResults = () => DS.list;
+  function drawResults() {
+    const list = DS.list || [];
+    discStatus(list.length ? `${list.length} dish${list.length === 1 ? '' : 'es'} for ${esc(DS.label)}` : `No dishes found for ${esc(DS.label)}. The library is small, so try a simpler word (e.g. “chicken” or “cake”), or <a href="#/import">import</a> a recipe from any site.`);
+    $('#discGrid').innerHTML = list.map((m) => {
+      const saved = M.findSaved(S.recipes, m);
+      const meta = [m.strCategory, m.strArea && M.areaLabel(m.strArea)].filter(Boolean).join(' · ');
+      return `<button type="button" class="rcard dcard" data-meal="${esc(m.idMeal)}"><div class="ph">${m.strMealThumb ? `<img src="${esc(m.strMealThumb)}/medium" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}${saved ? '<span class="saved-b">✓ Saved</span>' : ''}</div><div class="body"><h3>${esc(m.strMeal)}</h3>${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div></button>`;
+    }).join('');
+  }
+  function discSearch(q) {
+    q = q.trim(); if (!q) { $('#discQ').focus(); return; }
+    $('#discQ').value = q;
+    return discLoad('q:' + q.toLowerCase(), '“' + q + '”', async () => {
+      const [a, b] = await Promise.allSettled([mdb(M.url.search(q)), mdb(M.url.byIngredient(q))]);
+      if (a.status === 'rejected' && b.status === 'rejected') throw a.reason;
+      return M.mergeResults(a.value && a.value.meals, b.value && b.value.meals);
+    });
+  }
+  RB.discSearch = discSearch;
+  $('#discForm').onsubmit = (e) => { e.preventDefault(); $('#discQ').blur(); discSearch($('#discQ').value); };
+  $('#discAreas').onclick = (e) => { const b = e.target.closest('[data-area]'); if (!b) return; const a = b.dataset.area; discLoad('a:' + a, M.areaLabel(a) + ' cuisine', async () => (await mdb(M.url.byArea(a))).meals || []); };
+  $('#discCats').onclick = (e) => { const b = e.target.closest('[data-cat]'); if (!b) return; const c = b.dataset.cat; discLoad('c:' + c, c, async () => (await mdb(M.url.byCategory(c))).meals || []); };
+  $('#discIngForm').onsubmit = (e) => { e.preventDefault(); const i = $('#discIng').value.trim(); if (!i) { $('#discIng').focus(); return; } $('#discIng').blur(); discLoad('i:' + i.toLowerCase(), 'dishes with ' + i, async () => (await mdb(M.url.byIngredient(i))).meals || []); };
+  $('#discIng').addEventListener('focus', async () => {
+    if (DS.ings) return; DS.ings = [];
+    try { const d = await mdb(M.url.ingredients()); DS.ings = (d.meals || []).map((x) => x.strIngredient).filter(Boolean); $('#discIngList').innerHTML = DS.ings.map((n) => `<option value="${esc(n)}">`).join(''); } catch (e) { DS.ings = null; }
+  });
+  $('#view-discover').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-try]'); if (t) { discSearch(t.dataset.try); return; }
+    if (e.target.closest('#discRetry') && DS.retry) { DS.retry(); return; }
+    const c = e.target.closest('[data-meal]'); if (c) openMeal(c.dataset.meal);
+  });
+  $('#discRandom').onclick = async () => {
+    const b = $('#discRandom'); b.disabled = true;
+    try { const d = await fetch(M.url.random(), { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('http'); return r.json(); }); const m = d.meals && d.meals[0]; if (!m) throw new Error('empty'); DC.set(M.url.lookup(m.idMeal), d); showMeal(m); }
+    catch (e) { toast(errText(navigator.onLine === false ? new Error('offline') : e), 4000); }
+    finally { b.disabled = false; }
+  };
+
+  // Detail preview sheet
+  let mealCur = null;
+  const MEALM = dialogModal('meal', $('#mealDlg'), { onHide: () => { mealCur = null; } });
+  $('#mealClose').onclick = $('#mealCancel').onclick = () => MS.requestClose('meal');
+  async function openMeal(id) {
+    $('#mealH').textContent = 'Loading…'; $('#mealBody').innerHTML = '<p class="hint">Loading recipe…</p>';
+    $('#mealSave').disabled = $('#mealGro').disabled = true; mealCur = null;
+    if (!MS.isOpen('meal')) MS.open(MEALM);
+    try { const d = await mdb(M.url.lookup(id)); const m = d.meals && d.meals[0]; if (!m) throw new Error('missing'); if (MS.isOpen('meal')) showMeal(m); }
+    catch (e) { $('#mealH').textContent = 'Recipe unavailable'; $('#mealBody').innerHTML = `<p class="disc-status error">${esc(errText(e))}</p>`; }
+  }
+  RB.openMeal = openMeal;
+  function showMeal(m) {
+    const r = M.mealToRecipe(m); mealCur = { meal: m, recipe: r };
+    if (!MS.isOpen('meal')) MS.open(MEALM);
+    const area = M.areaLabel(m.strArea), src = /^https?:/i.test(m.strSource || '') ? m.strSource : '', yt = /^https?:/i.test(m.strYoutube || '') ? m.strYoutube : '';
+    $('#mealH').textContent = r.title;
+    $('#mealBody').innerHTML = `<div class="meal-top">${r.photo ? `<img class="meal-img" src="${esc(r.photo)}" alt="" referrerpolicy="no-referrer">` : ''}<div><p class="meal-meta">${[m.strCategory, area && area + ' cuisine'].filter(Boolean).map(esc).join(' · ')}</p>
+      <p class="meal-links"><a href="${esc(M.mealUrl(m.idMeal))}" target="_blank" rel="noopener">TheMealDB page ↗</a>${src ? ` <a href="${esc(src)}" target="_blank" rel="noopener">Original recipe ↗</a>` : ''}${yt ? ` <a href="${esc(yt)}" target="_blank" rel="noopener">▶ Video on YouTube ↗</a>` : ''}</p>
+      <p class="hint">No serving count is given; scale it with ½×, 2×, 3× after saving.</p></div></div>
+      <h3>Ingredients <span class="hint">(${r.ingredients.length})</span></h3><ul class="meal-ings">${r.ingredients.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+      <h3>Steps</h3><ol class="meal-steps">${r.steps.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
+      <p class="hint credit">Recipe from <a href="https://www.themealdb.com/" target="_blank" rel="noopener">TheMealDB</a>.</p>`;
+    $('#mealBody').scrollTop = 0;
+    updateMealButtons();
+  }
+  function updateMealButtons() {
+    if (!mealCur) return;
+    const saved = M.findSaved(S.recipes, mealCur.meal);
+    $('#mealSave').disabled = $('#mealGro').disabled = false;
+    $('#mealSave').textContent = saved ? 'Open in My Recipes' : '＋ Save to My Recipes';
+    $('#mealSave').classList.toggle('is-saved', !!saved);
+  }
+  $('#mealSave').onclick = async () => {
+    if (!mealCur) return;
+    let r = M.findSaved(S.recipes, mealCur.meal);
+    const fresh = !r;
+    if (fresh) { r = mealCur.recipe; r.createdAt = r.updatedAt = new Date().toISOString(); S.recipes.push(r); save(); }
+    await MS.close('meal');
+    location.hash = '#/recipe/' + encodeURIComponent(r.id);
+    toast(fresh ? `Saved “${r.title}” to My Recipes` : 'Already in My Recipes, so here it is');
+  };
+  $('#mealGro').onclick = () => {
+    if (!mealCur) return;
+    const saved = M.findSaved(S.recipes, mealCur.meal);
+    if (saved) {
+      if (S.grocery.recipes.some((e) => e.recipeId === saved.id && !e.fromPlan)) { toast('Already on your grocery list'); return; }
+      addToGrocery(saved.id); return;
+    }
+    const from = mealCur.recipe.title + ' (TheMealDB)';
+    if (S.grocery.manual.some((x) => x.from === from)) { toast('Already on your grocery list'); return; }
+    const lines = mealCur.recipe.ingredients.filter((l) => !/^#/.test(l));
+    for (const t of lines) S.grocery.manual.push({ id: C.uid(), text: t, from });
+    unhide(lines.map((t) => ({ ingredient: t }))); save(); updateBadge();
+    toast(`Added ${lines.length} ingredients to your grocery list`, 4000, { label: 'View', fn: async () => { await MS.close('meal'); location.hash = '#/grocery'; } });
+  };
+
   // ---------- settings ----------
   function renderSettings() {
     $('#themeSel').value = S.settings.theme || 'auto'; $('#unitSel').value = S.settings.units || 'original'; $('#voiceSel').checked = S.settings.voice !== false;
@@ -685,6 +892,9 @@
     RB.ready = true;
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       navigator.serviceWorker.register('sw.js').then(() => { RB.sw = 'registered'; }).catch(() => { RB.sw = 'failed'; });
+      // An update took over this tab (older version still on screen): offer a reload.
+      let hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !MS.size) toast('RecipeBox Remix was updated', 10000, { label: 'Reload', fn: () => location.reload() }); hadController = true; });
     }
   })();
 })();

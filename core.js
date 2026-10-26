@@ -67,7 +67,7 @@
   // kind: v = volume (ml), w = weight (g), c = count-ish
   const UNITS = {
     tsp: { kind: 'v', f: 4.92892, label: ['tsp', 'tsp'], al: ['teaspoons', 'teaspoon', 'tsps', 'tsp', 'tspn', 't'] },
-    tbsp: { kind: 'v', f: 14.7868, label: ['tbsp', 'tbsp'], al: ['tablespoons', 'tablespoon', 'tbsps', 'tbsp', 'tbls', 'tbl', 'tbs', 'T'] },
+    tbsp: { kind: 'v', f: 14.7868, label: ['tbsp', 'tbsp'], al: ['tablespoons', 'tablespoon', 'tblsps', 'tblsp', 'tbsps', 'tbsp', 'tbls', 'tbl', 'tbs', 'T'] },
     floz: { kind: 'v', f: 29.5735, label: ['fl oz', 'fl oz'], al: ['fluid ounces', 'fluid ounce', 'fl. oz', 'fl oz', 'floz'] },
     cup: { kind: 'v', f: 236.588, label: ['cup', 'cups'], al: ['cups', 'cup', 'c'] },
     pint: { kind: 'v', f: 473.176, label: ['pint', 'pints'], al: ['pints', 'pint', 'pts', 'pt'] },
@@ -737,7 +737,7 @@
       ingredients: arr(r.ingredients), steps: arr(r.steps), notes: String(r.notes || ''),
       tags: [...new Set(arr(Array.isArray(r.tags) ? r.tags : String(r.tags || '').split(',')).map((t) => t.replace(/^#/, '').toLowerCase()))],
       photo: typeof r.photo === 'string' ? r.photo : '', source: String(r.source || ''), rating: Math.max(0, Math.min(5, Math.round(+r.rating || 0))), favorite: !!r.favorite,
-      createdAt: r.createdAt || new Date().toISOString(), updatedAt: r.updatedAt || new Date().toISOString(), sample: !!r.sample,
+      createdAt: r.createdAt || new Date().toISOString(), updatedAt: r.updatedAt || new Date().toISOString(), sample: !!r.sample, extId: r.extId ? String(r.extId) : '',
     };
   }
   // Smart import: detect JSON, HTML, or plain text.

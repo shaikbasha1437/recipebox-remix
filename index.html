@@ -18,8 +18,9 @@
   <a class="brand" href="#/recipes" aria-label="RecipeBox Remix home"><img src="icon.svg" alt="" width="32" height="32"><span>RecipeBox <b>Remix</b></span></a>
   <nav id="tabs" class="tabs" aria-label="Sections">
     <a href="#/recipes" data-tab="recipes"><span aria-hidden="true">📖</span><em>Recipes</em></a>
+    <a href="#/discover" data-tab="discover"><span aria-hidden="true">🌍</span><em>Discover</em></a>
     <a href="#/plan" data-tab="plan"><span aria-hidden="true">🗓️</span><em>Plan</em></a>
-    <a href="#/grocery" data-tab="grocery"><span aria-hidden="true">🛒</span><em>Groceries</em><i id="groBadge" class="badge" hidden></i></a>
+    <a href="#/grocery" data-tab="grocery"><span aria-hidden="true">🛒</span><em>Grocery</em><i id="groBadge" class="badge" hidden></i></a>
     <a href="#/import" data-tab="import"><span aria-hidden="true">📥</span><em>Import</em></a>
     <a href="#/settings" data-tab="settings"><span aria-hidden="true">⚙️</span><em>More</em></a>
   </nav>
@@ -32,22 +33,22 @@
     <div class="toolbar">
       <div class="search"><input id="q" type="search" placeholder="Search recipes, ingredients, tags…" aria-label="Search recipes" autocomplete="off"></div>
       <select id="sortSel" aria-label="Sort recipes"><option value="updated">Recently edited</option><option value="title">A–Z</option><option value="rating">Top rated</option><option value="time">Quickest</option></select>
-      <button class="btn primary" id="newBtn" type="button">＋ New</button>
+      <button class="btn primary" id="newBtn" type="button">＋ New recipe</button>
     </div>
     <div id="chips" class="chips" role="group" aria-label="Filter by tag"></div>
     <div id="grid" class="grid"></div>
     <div id="emptyList" class="empty" hidden>
       <div class="empty-art" aria-hidden="true">🥘</div>
       <h2>Your recipe box is empty</h2>
-      <p>Paste a recipe, import one from any recipe site, or start with a few of ours.</p>
-      <div class="row center"><button class="btn primary" id="emptyImport" type="button">Import a recipe</button><button class="btn" id="emptySamples" type="button">Load sample recipes</button></div>
+      <p>Find dishes in Discover, paste or import one from any recipe site, or start with a few of ours.</p>
+      <div class="row center wrap"><a class="btn primary" href="#/discover">🌍 Discover recipes</a><button class="btn" id="emptyImport" type="button">Import a recipe</button><button class="btn" id="emptySamples" type="button">Load sample recipes</button></div>
     </div>
   </section>
 
   <!-- Recipe detail -->
   <section id="view-recipe" class="view" hidden>
     <div class="detail-head">
-      <a class="btn ghost" href="#/recipes">← Recipes</a>
+      <a class="btn ghost" href="#/recipes" data-back>← Back</a>
       <div class="row wrap">
         <button class="btn" id="dFav" type="button" aria-pressed="false">☆ Favorite</button>
         <button class="btn" id="dEdit" type="button">✏️ Edit</button>
@@ -64,6 +65,27 @@
       </div>
     </div>
     <article id="recipe" class="recipe"></article>
+  </section>
+
+  <!-- Discover -->
+  <section id="view-discover" class="view" hidden>
+    <div class="disc-head">
+      <h1>Discover recipes</h1>
+      <p class="hint" id="discAbout">Search a free library of about 790 dishes from around 37 cuisines, from <a href="https://www.themealdb.com/" target="_blank" rel="noopener">TheMealDB</a>. It isn't every recipe in the world. For anything else, use <a href="#/import">Import</a> or the bookmarklet.</p>
+    </div>
+    <form id="discForm" class="disc-search" role="search">
+      <input id="discQ" type="search" placeholder="Search dishes or an ingredient, e.g. chicken, curry, pancakes" aria-label="Search the recipe library" autocomplete="off" enterkeyhint="search">
+      <button class="btn primary" type="submit">Search</button>
+      <button class="btn" id="discRandom" type="button">🎲 Surprise me</button>
+    </form>
+    <div class="disc-browse">
+      <div class="disc-row"><span class="lbl">Cuisine</span><div id="discAreas" class="chips scroll" role="group" aria-label="Browse by cuisine"></div></div>
+      <div class="disc-row"><span class="lbl">Category</span><div id="discCats" class="chips scroll" role="group" aria-label="Browse by category"></div></div>
+      <form id="discIngForm" class="disc-row"><label class="lbl" for="discIng">Main ingredient</label><input id="discIng" list="discIngList" placeholder="e.g. salmon, tofu, beef" autocomplete="off"><datalist id="discIngList"></datalist><button class="btn" type="submit">Filter</button></form>
+    </div>
+    <p id="discStatus" class="disc-status" role="status" aria-live="polite"></p>
+    <div id="discGrid" class="grid"></div>
+    <p class="hint credit">Recipes, photos and data from <a href="https://www.themealdb.com/" target="_blank" rel="noopener">TheMealDB</a> (free public API). Saved copies keep a link to the source.</p>
   </section>
 
   <!-- Meal planner -->
@@ -212,10 +234,10 @@
 
 <!-- Editor -->
 <dialog id="editDlg" class="sheet" aria-labelledby="edTitleH">
-  <form method="dialog" id="edForm">
-    <header class="sheet-head"><h2 id="edTitleH">Edit recipe</h2><button class="iconbtn" value="cancel" aria-label="Close">✕</button></header>
+  <form id="edForm" novalidate>
+    <header class="sheet-head"><h2 id="edTitleH">Edit recipe</h2><button class="iconbtn close-x" type="button" id="edClose" aria-label="Close without saving" title="Close">✕</button></header>
     <div class="sheet-body">
-      <label class="field">Title <input id="edTitle" required maxlength="200"></label>
+      <label class="field">Title <input id="edTitle" maxlength="200" aria-describedby="edTitleErr" placeholder="e.g. Grandma's lasagna"></label><p id="edTitleErr" class="field-err" hidden>Give your recipe a title to save it.</p>
       <label class="field">Description <textarea id="edDesc" rows="2"></textarea></label>
       <div class="grid4">
         <label class="field">Servings <input id="edServ" type="number" min="0" step="any" inputmode="decimal"></label>
@@ -236,22 +258,34 @@
       </div>
       <label class="field">Source link <input id="edSource" type="url" placeholder="https://"></label>
     </div>
-    <footer class="sheet-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="edSave" value="save">Save recipe</button></footer>
+    <footer class="sheet-foot"><button class="btn" type="button" id="edCancel">Cancel</button><button class="btn primary" id="edSave" type="submit" value="save">Save recipe</button></footer>
   </form>
 </dialog>
 
 <!-- Pick a day -->
 <dialog id="dayDlg" class="sheet small" aria-labelledby="dayH">
-  <form method="dialog">
-    <header class="sheet-head"><h2 id="dayH">Add to meal plan</h2><button class="iconbtn" value="cancel" aria-label="Close">✕</button></header>
+  <div class="sheet-wrap">
+    <header class="sheet-head"><h2 id="dayH">Add to meal plan</h2><button class="iconbtn close-x" type="button" id="dayClose" aria-label="Close" title="Close">✕</button></header>
     <div class="sheet-body"><div id="dayPick" class="day-pick"></div></div>
-  </form>
+    <footer class="sheet-foot"><button class="btn" type="button" id="dayCancel">Cancel</button></footer>
+  </div>
 </dialog>
 
-<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<!-- Discover: recipe preview -->
+<dialog id="mealDlg" class="sheet" aria-labelledby="mealH">
+  <div class="sheet-wrap">
+    <header class="sheet-head"><h2 id="mealH">Recipe</h2><button class="iconbtn close-x" type="button" id="mealClose" aria-label="Close" title="Close">✕</button></header>
+    <div class="sheet-body" id="mealBody"></div>
+    <footer class="sheet-foot wrap"><button class="btn" type="button" id="mealCancel">Close</button><button class="btn" type="button" id="mealGro" disabled>🛒 Add to grocery list</button><button class="btn primary" type="button" id="mealSave" disabled>＋ Save to My Recipes</button></footer>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden><span id="toastMsg"></span><button type="button" id="toastAct" class="toast-act" hidden></button></div>
 <div id="printArea" class="print-only"></div>
 
 <script src="core.js"></script>
+<script src="modal.js"></script>
+<script src="mealdb.js"></script>
 <script src="samples.js"></script>
 <script src="app.js"></script>
 </body>
