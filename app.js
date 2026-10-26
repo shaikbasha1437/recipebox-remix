@@ -67,7 +67,7 @@
   const byId = (id) => S.recipes.find((r) => r.id === id);
   const recipesById = () => Object.fromEntries(S.recipes.map((r) => [r.id, r]));
   const now = () => Date.now();
-  const EMOJI = [[/breakfast|pancake|waffle|brunch/, '🥞'], [/dessert|cookie|cake|sweet|baking/, '🍪'], [/bread|loaf/, '🍞'], [/curry/, '🍛'], [/pasta|noodle/, '🍝'], [/soup|stew/, '🍲'], [/salad/, '🥗'], [/chili|mexican|taco/, '🌶️'], [/chicken/, '🍗'], [/fish|seafood/, '🐟'], [/drink|smoothie|cocktail/, '🥤'], [/vegan|vegetarian/, '🥦']];
+  const EMOJI = [[/breakfast|pancake|waffle|brunch/, '🥞'], [/bread|loaf/, '🍞'], [/dessert|cookie|cake|sweet|baking/, '🍪'], [/curry/, '🍛'], [/pasta|noodle/, '🍝'], [/soup|stew/, '🍲'], [/salad/, '🥗'], [/chili|mexican|taco/, '🌶️'], [/chicken/, '🍗'], [/fish|seafood/, '🐟'], [/drink|smoothie|cocktail/, '🥤'], [/vegan|vegetarian/, '🥦']];
   function emojiFor(r) { const t = (r.tags.join(' ') + ' ' + r.title).toLowerCase(); for (const [re, e] of EMOJI) if (re.test(t)) return e; return '🍽️'; }
   function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
   function artHtml(r) { const h = hue(r.id + r.title); return `<div class="ph-art" style="background:linear-gradient(135deg,hsl(${h} 80% 86%),hsl(${(h + 40) % 360} 75% 72%))">${emojiFor(r)}</div>`; }
